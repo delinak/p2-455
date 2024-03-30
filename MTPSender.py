@@ -8,8 +8,6 @@ import sys
 
 class PacketSender:
 
-    lock = threading.Lock()
-
     def __init__(self,input_file, ip_address, window_size, port_number, log_file, seq_number, type):
         # define and init
         self.ip_address = ip_address
@@ -63,7 +61,6 @@ class PacketSender:
     def ack_received_packet(self, ty, seq, length, checksum_in_packet, left_window, right_window, tot_packets):
         checksum_calculated = zlib.crc32(seq,length)
         if (checksum_in_packet == checksum_calculated):
-
             right_window = min(right_window + 1, len(self.packet)-1)
             if right_window - left_window >= self.window_size: # maintain window size
                 left_window += 1
@@ -74,14 +71,13 @@ class PacketSender:
             self.print_windowlist(tot_packets)
             self.filelogging.write(f"Packet received; type={ty}; seqNum={seq}; length={length}; checksum_in_packet={checksum_in_packet}""\n")
             self.lock.release()
-
-            flag = 0 # acked packet
-            return left_window, right_window, flag
+        
         else: # ignore corrupt files
             self.lock.acquire()
             self.filelogging.write(f"Packet received; type={ty}; seqNum={seq}; length={length}; checksum_in_packet={checksum_in_packet}; checksum_calculated={checksum_calculated}; status=CORRUPT; \n")
             self.lock.release()
-            return left_window, right_window, 0 # flag = 0, no resending
+        
+        return left_window, right_window, 1 # flag = 1, no resending
         
     
     def extract_packet(self, left_window, right_window, tot_packets):
