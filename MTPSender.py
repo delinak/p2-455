@@ -10,8 +10,11 @@ class PacketSender:
 
     lock = threading.Lock()
 
-    def __init__(self,input_file, log_file, seq_number, type):
+    def __init__(self,input_file, ip_address, window_size, port_number, log_file, seq_number, type):
         # define and init
+        self.ip_address = ip_address
+        self.window_size = window_size
+        self.port_number = port_number
         self.input_file = input_file
         self.log_file = log_file
         self.seq_number = seq_number
@@ -62,7 +65,7 @@ class PacketSender:
         if (checksum_in_packet == checksum_calculated):
 
             right_window = min(right_window + 1, len(self.packet)-1)
-            if right_window - left_window >= window_size: # maintain window size
+            if right_window - left_window >= self.window_size: # maintain window size
                 left_window += 1
             self.received_pkts = None # reset received packets list
 
@@ -116,7 +119,7 @@ class PacketSender:
 
         # open client socket and bind
         clientsocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        clientsocket.bind((ip_address, port_number))
+        clientsocket.bind((self.ip_address, self.port_number))
         
         # start receive thread
         recv_thread = threading.Thread(target=self.receive_thread,args=(clientsocket,))
@@ -124,7 +127,7 @@ class PacketSender:
         tot_packets = len(packet)
         self.initialize_windowListener(tot_packets) 
         left_window = 0 
-        right_window = min(tot_packets, left_window + window_size)-1
+        right_window = min(tot_packets, left_window + self.window_size)-1
         curr_pkt = left_window
         while self.sent < tot_packets:
             start_time = time.time()
@@ -168,5 +171,5 @@ if __name__ == "__main__":
     seq_num = -1
 
     # read input file and split it into packets
-    processor = PacketSender(input_file, log_file, seq_num) 
+    processor = PacketSender(input_file, ip_address, window_size, port_number, log_file, seq_num) 
     processor.main()
