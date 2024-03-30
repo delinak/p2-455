@@ -125,7 +125,7 @@ class PacketSender:
         self.initialize_windowListener(tot_packets) 
         left_window = 0 
         right_window = min(tot_packets, left_window + window_size)-1
-        curr_pkt = left_window;
+        curr_pkt = left_window
         while self.sent < tot_packets:
             start_time = time.time()
             recv_thread.start()
@@ -160,12 +160,12 @@ if __name__ == "__main__":
         print("Wrong number of arguments")
         sys.exit(1)
 
-    ip_address = sys.argv[1];
-    port_number = sys.argv[2];
-    window_size = sys.argv[3];
-    input_file = sys.argv[4];
-    log_file = sys.argv[5];
-    seq_num = -1;
+    ip_address = sys.argv[1]
+    port_number = sys.argv[2]
+    window_size = sys.argv[3]
+    input_file = sys.argv[4]
+    log_file = sys.argv[5]
+    seq_num = -1
 
     # read input file and split it into packets
     processor = PacketSender(input_file, log_file, seq_num) 
