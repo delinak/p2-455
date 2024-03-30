@@ -42,15 +42,33 @@ class PacketSender:
     
         return packet
 
-    def extract_packet(self):
+    def extract_packet(self, left_window, right_window, curr):
         # extract the packet data after receiving
-        for data in self.received_pkts:
-            ty, seq, length, checksum = struct.unpack('!IIII', data)
-            mychecksum = zlib.crc32(seq,length,ty)
-            if (checksum == mychecksum):
-                self.packet[seq]
-            else: # corrupt file
-        return
+        if self.received_pkts: # if false, then timeout so resend packet
+            for ack in self.received_pkts:
+                ty, seq, length, checksum = struct.unpack('!IIII', ack)
+                if left_window == seq:
+                    mychecksum = zlib.crc32(seq,length,ty)
+                    if (checksum == mychecksum):
+                        left_window += 1 # ****left needs to maintain window size diff with right
+                        right_window = min(right_window + 1, len(self.packet)-1)
+                        curr += 1
+                        self.received_pkts = None
+                        return left_window, right_window, curr
+                    else:
+                        pass # ignore corrupt files
+                else: # check for triple acks
+                    if seq in self.seen_acks:
+                        self.seen_acks[seq] += 1
+                        if self.seq_acks[seq] >= 3:
+                            self.retransmit_oldest_packet()
+                    else:
+                        self.seen_acks[seq] = 1
+        curr = left_window
+        left_window = 0
+        right_window = 0
+        self.received_pkts = None
+        return left_window, right_window, curr
 
     def receive_thread(self, UDPClientSocket):
         while True:
@@ -86,10 +104,15 @@ class PacketSender:
                     # log info to fLog
                     self.lock.release()
                     curr_pkt += 1
+                left, right, curr = self.extract_packet(left_window, right_window, curr_pkt)
             
-            #process packet after time out - double checking time out
-            if time.time() - start_time >= 500/1000:
-                left, right, curr = self.extract_packet()
+            if left == 0 & right == 0 & curr != 0: # no packets received due to timeout so resend
+                start_time = time.time()
+                while time.time() - start_time < 500/1000:
+                    unreliable_channel.send_packet(UDPClientSocket, packet[curr], ip_address) # add receiver addy
+                    left, right, curr = self.extract_packet(left_window, right_window, curr_pkt)
+
+
                     
             #update window,left and right
             left_window = left
