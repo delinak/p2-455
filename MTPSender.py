@@ -23,6 +23,17 @@ class PacketSender:
         #dict for header and data
         self.windowPkt = {}
         self.received_pkts = []
+        self.sent = 0
+
+    def initialize_windowList(tot_packets):
+        for pkt in tot_packets:
+            self.windowPkt[pkt] = 1
+
+    def print_windowList(self):
+        self.fLog.write("Window state:[")
+        for pkt in tot_packets:
+            self.fLog.write(f"%d(%d),", pkt, self.windowPkt[pkt])
+        self.fLog.write("]\n")
 
     # breaks up the file into chunks
     def create_packet(self):
@@ -45,33 +56,32 @@ class PacketSender:
     
         return packet
     
-    def retransmit_oldest_packet(self):
-        # no packets received due to timeout so resend
-        start_time = time.time()
-        while time.time() - start_time < 500/1000:
-            unreliable_channel.send_packet(UDPClientSocket, packet[curr], ip_address) # add receiver addy
-            self.extract_packet(left_window, right_window, curr_pkt)
-
-    def extract_packet(self, left_window, right_window, curr):
-        # extract the packet data after receiving
+    def extract_packet(self, left_window, right_window, tot_packets):
         if self.received_pkts: # if false, then timeout so resend packet
             for ack in self.received_pkts:
                 ty, seq, length, checksum_in_packet = struct.unpack('!IIII', ack)
                 if left_window == seq:
                     checksum_calculated = zlib.crc32(seq,length,ty)
                     if (checksum_in_packet == checksum_calculated):
-                        left_window += 1 # ****left needs to maintain window size diff with right
+
                         right_window = min(right_window + 1, len(self.packet)-1)
-                        curr += 1
-                        self.received_pkts = None
+                        if right_window - left_window >= window_size: # maintain window size
+                            left_window += 1
+                        self.received_pkts = None # reset received packets list
+
                         self.lock.acquire()
+                        self.fLog.write("Updating window;(show seqNum of %d packets in the window with one bit status (0: sent but not acked, 1:not sent)\n", tot_packets)
+                        self.print_windowState()
                         self.fLog.write(f"Packet received; type={ty}; seqNum={seq}; length={length}; checksum_in_packet={checksum_in_packet}""\n")
                         self.lock.release()
-                        return left_window, right_window, curr
+
+                        flag = 0 # acked packet
+                        return left_window, right_window, flag
                     else: # ignore corrupt files
                         self.lock.acquire()
-                        self.fLog.write(f"Packet received; type={ty}; seqNum={seq}; length={length}; checksum_in_packet={checksum_in_packet}; checksum_calculated={checksum_calculated}""\n")
+                        self.fLog.write(f"Packet received; type={ty}; seqNum={seq}; length={length}; checksum_in_packet={checksum_in_packet}; checksum_calculated={checksum_calculated}; status=CORRUPT\n")
                         self.lock.release()
+                        return left_window, right_window, 0 # flag = 0, no resending
                 else: # check for triple acks
                     if seq in self.seen_acks:
                         self.seen_acks[seq] += 1
@@ -86,12 +96,9 @@ class PacketSender:
             self.fLog.write("Timeout for packet seqNum=%d",seq)
             self.lock.release()
 
-        self.retransmit_oldest_packet()
-        curr = left_window
-        left_window = 0
-        right_window = 0
         self.received_pkts = None
-        return left_window, right_window, curr
+        flag = 0 # needs retransmission flag
+        return left_window, right_window, flag
 
     def receive_thread(self, UDPClientSocket):
         while True:
@@ -109,30 +116,37 @@ class PacketSender:
         # start receive thread
         recv_thread = threading.Thread(target=self.receive_thread,args=(UDPClientSocket,))
         
-        tot_packets = len(packet) 
+        tot_packets = len(packet)
+        self.initialize_windowListener(tot_packets) 
         left_window = 0 
         right_window = min(tot_packets, left_window + window_size)-1
         curr_pkt = left_window;
-        while len(self.windowPkt) != tot_packets:
+        while self.sent < tot_packets:
             start_time = time.time()
             recv_thread.start()
             while time.time() - start_time < 500/1000:
                 while curr_pkt <= right_window:
                     unreliable_channel.send_packet(UDPClientSocket, packet[curr_pkt], ip_address) # add receiver addy
-                    self.lock.aquire()
+                    self.windowPkt[curr_pkt] = 0
                     ty, seq, length, checksum = struct.unpack('!IIII',  packet[curr_pkt])
+                    self.lock.aquire()
                     self.fLog.write(f"Packet sent; type={ty}; seqNum={seq}; length={length}; checksum={checksum}""\n")
                     self.lock.release()
                     curr_pkt += 1
+                
+                left, right, flag = self.extract_packet(left_window, right_window, tot_packets)
 
-                left, right, curr = self.extract_packet(left_window, right_window, curr_pkt)
-   
+            if flag == 0: # retransmit last unacked packet
+                start_time = time.time()
+                unreliable_channel.send_packet(UDPClientSocket, packet[left], ip_address) # add receiver addy
+                while time.time() - start_time < 500/1000: # wait for packet to be received
+                    self.extract_packet(left_window, right_window, tot_packets)
+
             #update window,left and right
             left_window = left
             right_window = right
-            curr_pkt = curr
-            tot_packets -= 1
-            
+            self.sent += 1
+
 if __name__ == "__main__":
     # read data from command line args
     if len(sys.argv) != 6:
