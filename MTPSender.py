@@ -97,7 +97,7 @@ class PacketSender:
             self.lock.release()
 
         self.received_pkts = None
-        flag = 0 # needs retransmission flag
+        flag = 0 # reset received packets list
         return left_window, right_window, flag
 
     def receive_thread(self, UDPClientSocket):
@@ -146,6 +146,8 @@ class PacketSender:
             left_window = left
             right_window = right
             self.sent += 1
+        
+        self.fLog.close()
 
 if __name__ == "__main__":
     # read data from command line args
