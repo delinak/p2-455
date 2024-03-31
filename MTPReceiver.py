@@ -13,10 +13,11 @@ second_packet_received = threading.Event()
 first_packet_received = threading.Event()
 
 def create_packet(seq):
-    sending_type = 1
-    seqNum = seq
-    length = 16
-    checksum_in_packet = calculate_checksum(struct.pack('!III', sending_type, seqNum, length))
+    sending_type = int(1)
+    seqNum = int(seq)
+    length = int(16)
+    packet_data = struct.pack('!III', sending_type, seqNum, length)
+    checksum_in_packet = int(calculate_checksum(packet_data))
     header = struct.pack('!IIII', sending_type, seqNum, length, checksum_in_packet)
     unpacked = struct.unpack('!IIII', header)
     
@@ -26,12 +27,12 @@ def extract_packet_info(data):
     header = struct.unpack('!IIII', data[:16])
     return header, data[16:]
 
-def send_acknowledgment(socket, addr, data, second, log, unpacked, unexpected):
+def send_acknowledgment(socket, addr, serverPort, data, second, log, unpacked, unexpected):
     global thread_lock, second_packet_received, first_packet_received, file_lock
     if unexpected:
         thread_lock.acquire()
         for i in range(2):
-            unreliable_channel.send_packet(socket, data, addr)
+            socket.sendto(data, (addr, serverPort))
             log.write("Packet sent; type=ACK;seqNum=%d;length=16;checksum_in_packet=%#x\n" % (unpacked[1], unpacked[3]))
         thread_lock.release()
         return
@@ -44,7 +45,9 @@ def send_acknowledgment(socket, addr, data, second, log, unpacked, unexpected):
         return
     first_packet_received.clear()
     second_packet_received.clear()
-    unreliable_channel.send_packet(socket, data, addr)
+    print(type(data))
+    print(type((addr, serverPort)))
+    socket.sendto(data, (addr, serverPort))
     file_lock.acquire()
     log.write("Packet sent; type=ACK;seqNum=%d;length=16;checksum_in_packet=%#x\n" % (unpacked[1], calculate_checksum(data)))
     file_lock.release()
@@ -61,10 +64,10 @@ def main():
     
     log = open(sys.argv[3], 'w')
     output = open(sys.argv[2], 'w')
-    serverPort = sys.argv[1]
+    serverPort = int(sys.argv[1])
     
     receiver_socket = socket(AF_INET, SOCK_DGRAM)
-    receiver_socket.bind(('', int(serverPort)))
+    receiver_socket.bind(('', serverPort))
     expected = 0
     end = False
     
@@ -89,14 +92,14 @@ def main():
             first_packet_received.clear()
             second = True
 			
-        ack_thread = threading.Thread(target=send_acknowledgment, args=(receiver_socket, packet_to_send, senderAddress, second, log, unpacked, unexpected))
-        ack_thread.start()
+        send_acknowledgment(receiver_socket, senderAddress, serverPort, packet_to_send, second, log, unpacked, unexpected)
+        # ack_thread.start()
         
         if not unexpected:
             expected += 1
             output.write(data.decode())
         if end:
-            ack_thread.join()
+            # ack_thread.join()
             break
     log.close()
     output.close()
