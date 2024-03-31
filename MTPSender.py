@@ -11,15 +11,15 @@ class PacketSender:
     def __init__(self,input_file, ip_address, window_size, port_number, log_file, seq_number,):
         # define and init
         self.ip_address = ip_address
-        self.window_size = window_size
-        self.port_number = port_number
+        self.window_size = int(window_size)
+        self.port_number = int(port_number)
         self.input_file = input_file
         self.log_file = log_file
         self.seq_number = seq_number
         self.lock = threading.Lock()
 
          # opening log file to start logging
-        self.filelogging = open(log_file,'a')
+        self.filelogging = open(log_file,'w')
 
         #dict for header and data
         self.window_pkt = {}
@@ -28,11 +28,11 @@ class PacketSender:
         self.left_window = 0
         self.right_window = 0
         self.tot_packets = 0
-        self.receivedflag = 0 # 1 || 3 
+        self.receivedflag = 0 # 1 || 3
 
     def initialize_windowlist(self, tot_packets):
-        for pkt in tot_packets:
-            self.windowPkt[pkt] = 1
+        for pkt in range(tot_packets):
+            self.window_pkt[pkt] = 1
 
     def print_windowlist(self, tot_packets):
         self.filelogging.write("Window state:[")
@@ -42,27 +42,27 @@ class PacketSender:
 
     # breaks up the file into chunks
     def create_packet(self):
-        data_size = 1462
+        data_size = 1456
         packet = {}
 
         with open(self.input_file, 'rb') as input:
             while True:
-                data = input.read(data_size)    
-                if not data: 
+                data = input.read(data_size)
+                if not data:
                     break
 
                 self.seq_number += 1
                 length = len(data)
                 checksum = zlib.crc32(data)
 
-                headerdata = struct.pack('!IIII', 1, self.seq_number, length, checksum, data)
-                packet[self.seq_number] = headerdata
+                header = struct.pack('!IIII', 1, self.seq_number, length+16, checksum)
+                packet[self.seq_number] = header + data
     
         return packet
     
     
     def ack_received_packet(self, ty, seq, length, checksum_in_packet):
-        checksum_calculated = zlib.crc32(seq,length)
+        checksum_calculated = zlib.crc32(struct.pack('!III', ty, seq, length))
         if (checksum_in_packet == checksum_calculated):
 
             right_window = min(right_window + 1, len(self.packet)-1)
@@ -118,24 +118,24 @@ class PacketSender:
         packet = processor.create_packet()
 
         # open client socket and bind
-        clientsocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        clientsocket.bind((self.ip_address, self.port_number))
+        clientsocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # clientsocket.bind((self.ip_address, self.port_number))
         
         # start receive thread
         recv_thread = threading.Thread(target=self.receive_thread,args=(clientsocket,))
         recv_thread.start()
         self.tot_packets = len(packet)
         self.right = min(self.tot_packets, self.left_window + self.window_size)-1
-        self.initialize_windowListener(self.tot_packets) 
+        self.initialize_windowlist(self.tot_packets)
         curr_pkt = self.left_window
 
         while self.sent < self.tot_packets:
 
             while curr_pkt <= self.right_window:
-                unreliable_channel.send_packet(clientsocket, packet[curr_pkt], ip_address) # add receiver addy
+                unreliable_channel.send_packet(clientsocket, packet[curr_pkt], (self.ip_address, self.port_number)) # add receiver addy
                 self.window_pkt[curr_pkt] = 0
-                ty, seq, length, checksum = struct.unpack('!IIII',  packet[curr_pkt])
-                self.lock.aquire()
+                ty, seq, length, checksum = struct.unpack('!IIII',  packet[curr_pkt][:16])
+                self.lock.acquire()
                 self.filelogging.write(f"Packet sent; type={ty}; seqNum={seq}; length={length}; checksum={checksum}""\n")
                 self.lock.release()
 
@@ -143,7 +143,7 @@ class PacketSender:
                 while True:
                     recv_thread.join(timeout=0.5)
                     if time.time() - start_time >= 0.5:
-                        break;
+                        break
                         
                 if self.receivedflag != 1 or self.receivedflag != 2: # if timeout or dupAcks
                     curr_pkt = self.left_window
@@ -169,5 +169,5 @@ if __name__ == "__main__":
     seq_num = -1
 
     # read input file and split it into packets
-    processor = PacketSender(input_file, ip_address, window_size, port_number, log_file, seq_num) 
+    processor = PacketSender(input_file, ip_address, window_size, port_number, log_file, seq_num)
     processor.main()
