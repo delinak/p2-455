@@ -28,7 +28,7 @@ class PacketSender:
         self.left_window = 0
         self.right_window = 0
         self.tot_packets = 0
-        self.receivedflag = False
+        self.receivedflag = 0 # 1 || 3 
 
     def initialize_windowlist(self, tot_packets):
         for pkt in tot_packets:
@@ -36,7 +36,7 @@ class PacketSender:
 
     def print_windowlist(self, tot_packets):
         self.filelogging.write("Window state:[")
-        for pkt in tot_packets:
+        for pkt in range(self.left_window_count, self.right_window):
             self.filelogging.write("%d(%d),", pkt, self.window_pkt[pkt])
         self.filelogging.write("]\n")
 
@@ -64,7 +64,7 @@ class PacketSender:
     def ack_received_packet(self, ty, seq, length, checksum_in_packet):
         checksum_calculated = zlib.crc32(seq,length)
         if (checksum_in_packet == checksum_calculated):
-            
+
             right_window = min(right_window + 1, len(self.packet)-1)
             if right_window - self.left_window >= self.window_size: # maintain window size
                 left_window += 1
@@ -75,18 +75,18 @@ class PacketSender:
             self.print_windowlist(self.tot_packets)
             self.filelogging.write(f"Packet received; type={ty}; seqNum={seq}; length={length}; checksum_in_packet={checksum_in_packet}""\n")
             self.lock.release()
-        
+
         else: # ignore corrupt files
             self.lock.acquire()
             self.filelogging.write(f"Packet received; type={ty}; seqNum={seq}; length={length}; checksum_in_packet={checksum_in_packet}; checksum_calculated={checksum_calculated}; status=CORRUPT; \n")
             self.lock.release()
-        
+            
+        self.receivedflag = 1
         return left_window, right_window, 1 # flag = 1, no resending
         
     
     def extract_packet(self):
         if self.received_pkts: # if false, then timeout so resend packet
-            self.receivedflag = True
             for ack in self.received_pkts:
                 ty, seq, length, checksum_in_packet = struct.unpack('!IIII', ack)
                 if self.left_window == seq:
@@ -142,13 +142,14 @@ class PacketSender:
                 start_time = time.time()
                 while True:
                     recv_thread.join(timeout=0.5)
-                    if time.time() - start_time >= 0.5 and not self.receivedflag:
-                        curr_pkt = self.left_window
-                        break;
-                    else: 
+                    if time.time() - start_time >= 0.5:
                         break;
                         
-                curr_pkt += 1
+                if self.receivedflag != 1 or self.receivedflag != 2: # if timeout or dupAcks
+                    curr_pkt = self.left_window
+                else: # received or corrupted
+                    curr_pkt += 1
+
             self.sent += 1
         
         self.filelogging.close()
